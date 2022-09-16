@@ -22,7 +22,7 @@ PS C:\Users\tail\Desktop\游戏开发笔记本> git commit -m "IwanttoCommit"
  create mode 100644 githubUse.md
 ```
 同时，githubUse.md在vscode上的M标记就消失了，表示其已经与commit状态同步。
-那么我们这时再进行push。如果此时报错，很有可能是因为远端的仓库已经被其他人更新过，而本地尚未同步。如果不存在这种情况(我不知道我这样的哪来的fork)
+那么我们这时再进行push。如果此时报错，很有可能是因为远端的仓库已经被其他人更新过，而本地尚未同步。如果不存在这种情况(我不知道我这样的哪来的fork)直接push就不会有不同步报错了。
 ```
 git push -u origin master
 Enumerating objects: 5, done.
