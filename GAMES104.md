@@ -171,6 +171,28 @@ SH lightmap 是Precomputed GI的关键。
 - shader的管理
 
 # L6 游戏中的地形、大气和云的渲染-上
+**What's 地形渲染**
+字面意思
+**How to 地形渲染**
+把地形和正常的物体一样去渲染显然是一种朴素方案。这样则要求准备巨大的底面纹理。
 
+height map高层图 Contour Map 等高线图是两种描绘地形的方式。用heightmap来渲染地形的算法就叫heightfield(也是直到目前地形渲染最主力的渲染算法)。
+heightmap是一张2D纹理，每个纹素位置存放一个高度数值。可以通过逐距离采样方法得到一系列顶点，然后自动build出三角形。
+![](./markdown_pic/p6-2.jpg)
+
+附注：
+Maya和Houdini都有heightfield地形控件：
+[Maya heightfield 官方DOC](https://knowledge.autodesk.com/zh-hans/support/maya/learn-explore/caas/CloudHelp/cloudhelp/2015/CHS/Maya/files/Shading-Nodes-Height-Field-htm.html)
+[Houdini Height Field的基本概念 bilibili 专栏](https://www.bilibili.com/read/cv16586353/)
+[Houdini crowds terrain 人群地形功能效果视频 bilibili](https://www.bilibili.com/video/BV1j44y1G7X6/?spm_id_from=333.788.recommend_more_video.-1&vd_source=fcabf2d02580039110de5bfc784d50d5)
+**What's difficult**
+当世界很大的时候，这样的三角形就会爆炸增多。以上图为例，1km x 1km的height map纵使按照1m距离采样，也会获得1000*1000个顶点，则会形成多于2M个三角形。
+**How to solve**
+图形学和工程实践中特别常见的一个概念**LOD levelofdetail** 在远处减少细节(反正也看不清)
+![](./markdown_pic/p6-1.jpg)
+**adaptive mesh tessellation自适应网格细分**，提出依据视椎改变网格细化的策略。
+fov指的就是视角，在fov内部将三角形分布的更密集，而在fov之外分布的稀疏。
+
+![](./markdown_pic/p6-3.jpg)
 # L7 游戏中的地形、大气和云的渲染-下
 
