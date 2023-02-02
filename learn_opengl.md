@@ -265,17 +265,6 @@ glBindBuffer(GL_ARRAY_BUFFER, 0);
 |type|说明索引的类型.可选值为 GL_UNSIGNED_BYTE, GL_UNSIGNED_SHORT, or GL_UNSIGNED_INT.|
 |indices|提供一个指针，用于定位indices的存放位置。可以写0。|
 
-
-
-
-
-
-
-
-
-
-
-
 ### 着色器
 #### HLSL程序顶点属性的上限
 我们之前所写的着色器代码中，使用了**顶点属性(Vertex Attribute)**:
@@ -476,7 +465,18 @@ vertexColorLocation存放了着色器程序中名为ourColor的uniform变量的*
 
 我强烈建议把这段代码给抄了直接用，直接在一个phong_fragment_shader.glsl文件当中写着色实在是舒服多了。
 
-
+不过引用了着色器类和从文件读取后，修改uniform的过程也改了，现在要想修改uniform变量采取这种方式：
+```
+Shader ourShader("path/to/shaders/shader.vs", "path/to/shaders/shader.fs");
+...
+while(...)
+{
+    ourShader.use();
+    ourShader.setFloat("someUniform", 1.0f);
+    DrawStuff();
+}
+```
+setFloat已经帮我们完成了查询uniform location，并且改写变量的工作。不过像上面的uniform向量，还是需要按照老方法，用`glGetUniformLocation(ID, name)`来查询位置，用`glUniform4f(location,value)`来填写uniform变量
 
 #### 多属性
 VAO那一段还是没扯明白，我们再解释一下。
@@ -485,7 +485,7 @@ VAO那一段还是没扯明白，我们再解释一下。
 再来好好看看这张图：
 ![](./markdown_pic/opengl-4.jpg)
 
-当中的VBO2就是面对的多属性的情况。面对这种情况，我们是在一个VAO中进行两次指针的指定：请重新参看前面关于glVertexAttribPointer函数的介绍表。
+当中的VBO2就是面对的多属性的情况。面对这种情况，我们是在一个VAO中进行两次指针的指定：请重新参看前面关于glVertexAttribPointer函数的参数表。
 ```cpp
 // 位置属性
 glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
@@ -494,3 +494,134 @@ glEnableVertexAttribArray(0);
 glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3* sizeof(float)));
 glEnableVertexAttribArray(1);
 ```
+这样一来，VAO中有两个属性指针，一个指向位置，一个指向颜色。顶点着色器如下：
+```
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aColor;
+out vec4 ourColor;
+
+void main(){
+	gl_Position = vec4(aPos, 1.0);
+	ourColor = vec4(aColor, 1.0);
+}
+```
+顶点着色器将会在每个顶点位置给片段着色器交付一个顶点颜色。片段着色器这样工作：
+```
+out vec4 FragColor;
+in vec4 ourColor;
+
+void main()
+{
+	FragColor = ourColor;
+}
+```
+这是一个细细思考让人觉得不对的过程。片段着色器在每个像素都调用，而顶点着色器只是交付了三个顶点的颜色。如何让每个像素的FragColor都等同于一个ourColor？
+
+片段着色器会为顶点属性插值，来得到当前片段自己的顶点属性。比如说位于一个三角形中心的点，其颜色就是三分之一顶点1颜色，三分之一顶点2颜色和三分之一顶点3颜色的加和。事实上，这个按三角形内位置插值顶点属性的过程被openGL隐藏了。插值顶点属性是一个几乎不会有错的做法，它被应用于法线、光照、纹理等各种各样的过程，只要一个三角形内的像素按照其距离三个顶点的位置插值这三个顶点属性得到自己的属性，那么它**看起来总是对的**——在图形学上，看起来对就是对。
+![](./markdown_pic/opengl-8.jpg)
+
+### 纹理
+#### 纹理的基本原理
+简单来说就是提供一张图片，设法把这张图片贴到物体表面。为了做到这件事，我们在顶点上还需要再提供一个新的顶点属性，被称为UV坐标或者texCoords纹理坐标，即该顶点在纹理(这张图片)上对应什么位置。
+```cpp
+float texCoords[] = {
+    0.0f, 0.0f, // 左下角
+    1.0f, 0.0f, // 右下角
+    0.5f, 1.0f // 上中
+};
+```
+uv坐标都是0-1的浮点数。
+![](./markdown_pic/opengl-9.jpg)
+
+图形渲染管线会在片段着色时插值每个像素位置的特定uv，用那个特定uv去获取纹理的颜色，并输出这个颜色作为FragColor，这个过程就叫**采样**。
+
+#### 纹理环绕方式
+指处理采样点超出纹理范围的情况的办法。
+|环绕方式|描述|
+|--|--|
+|GL_REPEAT|对纹理的默认行为。重复纹理图像。|
+|GL_MIRRORED_REPEAT|和GL_REPEAT一样，但每次重复图片是镜像放置的。|
+|GL_CLAMP_TO_EDGE|纹理坐标会被约束在0到1之间，超出的部分会重复纹理坐标的边缘，产生一种边缘被拉伸的效果。|
+|GL_CLAMP_TO_BORDER|超出的坐标为用户指定的边缘颜色。|
+
+可以通过`glTexParameteri`来设定纹理的环绕方式。
+```cpp
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+```
+
+glTexParameter由若干个同名版本，其中void glTexParameteri(GLenum target,GLenum pname, GLint param);
+|参数|含义|
+|--|--|
+|target|声明所选的纹理类型,可选值包括GL_TEXTURE_1D, GL_TEXTURE_1D_ARRAY, GL_TEXTURE_2D,GL_TEXTURE_2D_ARRAY, GL_TEXTURE_2D_MULTISAMPLE, GL_TEXTURE_2D_MULTISAMPLE_ARRAY等|
+|pname|对于纹理有很多设置项，其中 GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, or GL_TEXTURE_WRAP_R表示其中WRAP表示环绕方式，S/T/R表示对应哪个轴。R用于3D纹理。GL_TEXTURE_WRAP_T就表示T轴方向上的环绕方式。|
+|param|实际值|
+
+glTexParameter的几个同名版本，比如glTexParameterIiv/glTexParameterIuiv，glTexParameteriv，glTexParameterfv等，他们的区别主要在于填写`GL_TEXTURE_BORDER_COLOR`时填入的param数据类型不同。
+比如上面设置环绕方式时，我们知道填入的值`GL_MIRRORED_REPEAT`是一个Int，因此使用glTexParameteri；而如果要填写`GL_TEXTURE_BORDER_COLOR`，
+
+```cpp
+float borderColor[] = { 1.0f, 1.0f, 0.0f, 1.0f };
+glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+```
+
+#### 纹理过滤
+纹理过滤是指纹理分辨率不足的情况，这种情况下，像素相对小而纹素相对大（纹素少），像素映射到纹理上会落在纹素中一小部分。这种时候，可以理解为我们需要对纹理进行**放大**。
+![](./markdown_pic/opengl-10.jpg)
+最简单的纹理过滤就是**邻近过滤**`GL_NEAREST`，如上图，我们直接采取像素uv取整的结果。
+
+之后我们可以采用**双线性过滤Bilinear Filtering**, `GL_LINEAR`,其将会依据当前像素的uv，对最近的四个纹素进行插值来获得一个结果。
+![](./markdown_pic/opengl-11.jpg)
+
+这种过滤本质上是一种模糊Blurring，其能够降低失真，使得看起来效果更好。
+![](./markdown_pic/opengl-12.jpg)
+
+同样用glTexParameter家族来设定纹理过滤，由于纹理过滤的值是Int枚举，采用glTexParameteri,设置的配置项叫`GL_TEXTURE_MIN_FILTER`&`GL_TEXTURE_MAG_FILTER`,分别表示纹理被缩小时和放大时分别采用什么过滤方式：
+```cpp
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+```
+但是注意：下面即将介绍，如果要缩小纹理，`GL_TEXTURE_MIN_FILTER`采取`GL_NEAREST`或者`GL_LINEAR`都是相当不合适的。
+
+#### 多级渐远纹理/Mipmap/图像金字塔Image Pyramid
+标题的三个名词其实完全是同一个概念。
+
+想象一下，当一个物体离我们很远，其在屏幕上看起来几乎是几个像素点；而这个物体表面的纹理依然有成百上千个纹素，这种时候我们如何显示这个物体？
+
+如果按照双线性插值的做法，我们会发现物体被显示地相当失真，我们其实是在上千个纹素中取出了相隔很远的几个、粗暴地用其代替像素。
+
+Mipmap早已成为图形学中的经典算法，其提出最早可以追溯到1983年。简单地概括其思想：把纹理按这样的方式冗余地储存：
+存放其1x1版本；
+存放其0.5x0.5版本；
+存放其0.25x0.25版本；
+...
+直至存放其最小版本，若纹理本身为2的幂的正方形图像，最小版本将会是1个像素。
+![](./markdown_pic/opengl-13.jpg)
+
+大致计算一个像素的边长在映射后在纹理中有多长。如果物体较远，像素将会是纹素的若干倍大。假如像素边长是纹素边长的26倍，那么就找到最接近26的2的幂16和32，像素最终的颜色将会是：
+在16x16中根据像素中心位置双线性插值出颜色1；
+在32x32中根据像素中心位置双线性插值出颜色2；
+用16-26-32插值颜色1和颜色2得出最终颜色
+
+这个过程因为又进行了一次插值，也被称为**三线性插值**。
+
+当然，使用openGL不要求我们知晓这里的图形学原理。我们直接通过调用`glGenerateMipmaps`，openGL自动会给我们生成好mipmap；
+|过滤方式|描述|
+|--|--|
+|GL_NEAREST_MIPMAP_NEAREST|	使用最邻近的多级渐远纹理来匹配像素大小，并使用邻近插值进行纹理采样|
+|GL_LINEAR_MIPMAP_NEAREST|	使用最邻近的多级渐远纹理级别，并使用线性插值进行采样|
+|GL_NEAREST_MIPMAP_LINEAR|	在两个最匹配像素大小的多级渐远纹理之间进行线性插值，使用邻近插值进行采样|
+|GL_LINEAR_MIPMAP_LINEAR	|在两个邻近的多级渐远纹理之间使用线性插值，并使用线性插值进行采样|
+
+使用`GL_LINEAR_MIPMAP_LINEAR`，也就是我们所说的三线性插值了。
+```cpp
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+```
+
+注意：对放大纹理采用mipmap将不会产生任何效果而徒增开销，这是因为所有像素计算大小后比1纹素更小，因此对纹理的查询只会查询原图，而不会查询任何一级mipmap。
+
+#### stb_image.h
+为了使用纹理，我们需要把png等图片格式文件的内容规格化读入内存，形成一个vec4数组。
+参考[log官网的介绍](https://learnopengl-cn.github.io/01%20Getting%20started/06%20Textures/#stb_imageh)学习获取stb_image.h
+
