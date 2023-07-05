@@ -1508,5 +1508,28 @@ Q1：【摄像机需求】以一个圆柱、一个三角锥来代表人物。迅
 Q2：【C#事件】在Q1的基础上，为人物整体添加collider;在场景中随意添加一些有碰撞体的几何体,并让碰撞发生时通过C#事件在场景中生成并掷下一个木箱子（30min）
 Q3: 【对象池】手写一个对象池，用于管理上述的木箱子。对象池size可以通过inspector修改，且保持在8.应当做到不断碰撞能够不断生成箱子，第九个箱子出现时第一个箱子消失。（30min）
 
-### V1.3 P1 顺畅而正确的步进
+### V1.4 P1 顺畅而正确的步进
 现在的步进，主角永远不会扭头——会一直向着游戏开始的前方向一直走。可以在InputTest当中添加上对于非锁定状态下横向滑动鼠标的检测。
+
+与此同时，我接触到一些项目使用了Unity更新也更为推荐的处理输入的包InputSystem
+![](./markdown_pic/uniani-96.jpg)
+[InputSystem 1.3 文档](https://docs.unity.cn/Packages/com.unity.inputsystem@1.3/manual/index.html)
+
+文章介绍说，InputSystem是一种更具扩展性、更良自定义的输入处理方案。我们之前写的输入确实是比较紊乱，我认为有必要学习一下InputSystem是否可以帮助我们把我们的输入写的更好。
+
+### V1.4 P2 Input System
+**安装和配置**
+用package manager引入InputSystem之后，如需要，还应当在Edit/ProjectSettings/Player当中设置新旧输入系统的激活状态。在Other Settings下拉菜单中，找到这一项：Active Input Handling：
+![](./markdown_pic/uniani-97.jpg)
+如果找不到，可以在右上角搜索框搜索关键字帮助定位。
+如图中，选择new来激活新的输入系统。
+
+Input System把获取输入的方式概括为两类：直接从某个特定的输入设备获取输入信息、或者是间接地从输入行为中获取信息。
+
+随着跨平台开发越来越热门，我们使用第二种输入获取的方式更天然地普适。为了采用间接获取，必须在场景中加入一个PlayerInput游戏对象(这种封装和我们自己写的InputTest游戏对象如出一辙)
+
+
+
+![](./markdown_pic/uniani-98.jpg)
+
+
