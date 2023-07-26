@@ -1518,18 +1518,217 @@ Q3: 【对象池】手写一个对象池，用于管理上述的木箱子。对�
 文章介绍说，InputSystem是一种更具扩展性、更良自定义的输入处理方案。我们之前写的输入确实是比较紊乱，我认为有必要学习一下InputSystem是否可以帮助我们把我们的输入写的更好。
 
 ### V1.4 P2 Input System
-**安装和配置**
+#### 安装和配置
 用package manager引入InputSystem之后，如需要，还应当在Edit/ProjectSettings/Player当中设置新旧输入系统的激活状态。在Other Settings下拉菜单中，找到这一项：Active Input Handling：
 ![](./markdown_pic/uniani-97.jpg)
 如果找不到，可以在右上角搜索框搜索关键字帮助定位。
 如图中，选择new来激活新的输入系统。
 
-Input System把获取输入的方式概括为两类：直接从某个特定的输入设备获取输入信息、或者是间接地从输入行为中获取信息。
+Input System把获取输入的方式概括为两类：直接从某个特定的输入设备获取输入信息、或者是间接地从输入行为中获取信息。Unity目前规范化的输入设备主要是键鼠Keyboard&Mouse，Gamepad游戏手柄，Touch触摸屏，Joystick操作杆，XR虚拟现实设备。
 
 随着跨平台开发越来越热门，我们使用第二种输入获取的方式更天然地普适。为了采用间接获取，必须在场景中加入一个PlayerInput游戏对象(这种封装和我们自己写的InputTest游戏对象如出一辙)
 
-
-
 ![](./markdown_pic/uniani-98.jpg)
+
+注意要选用Player Input，而不是Player Input Manager.添加后，Inspector如下：
+![](./markdown_pic/uniani-99.jpg)
+下一步是为Player Input绑定Actions。选择上图中的Create Actions即可看到弹出一个文件浏览器，这里要选用一个文件夹，供Unity马上建立一个`.inputaction`文件。我们这里直接选择在Assets根目录下建立这个文件，默认这个文件的名字会是项目名同名。
+
+建立好后会出现一个对应`.inputaction`的界面，用于规定Actions。
+
+最后简单概括一下InputSystem：PlayerInput类管理整个项目中的所有InputAction，每个InputAction是一个从输入到行为的映射。具体的行为一般是通过事件等进行规定的，不在PlayerInput当中设定，但PlayerInput确实要设定行为的类型，
+
+#### 如何用InputSystem感知输入
+直接使用Keyboard，报错不识别，建议如下：
+![](./markdown_pic/uniani-100.jpg)
+
+```
+void Update()
+    {
+        if (Keyboard.current.qKey.wasPressedThisFrame)
+        {
+            Debug.Log("Q was pressed");
+        }
+        if (Input.GetKey(KeyCode.W))
+        {
+            Debug.Log("W was pressed");
+        }
+    }
+```
+注意，如果你跟随我上面的步骤，在设置了输入激活为“仅激活InputSystem”，那么第二种写法将会造成错误。而如果选择Both，两种写法都可正确运行。
+
+#### 输入行动Input Action
+[Unity package documents/inputsystem/Action的介绍](https://docs.unity.cn/Packages/com.unity.inputsystem@1.3/manual/Actions.html#creating-actions)
+
+顺带一提，packages和Unity源代码不一样，每个包都有自己的文档，且似乎没有找到像Unity核心类那样特别具体的类手册（就是展示所有类成员、事件的详细手册），packages的手册的地址一般都在`https://docs.unity.cn/Packages`之下
+
+在Input System当中，Action是指一种跨设备抽象，一个名叫Look的Action其实对应着不同输入设备上的一系列操作，比如键鼠的Look是指鼠标的横纵位移，gamepad的Look一般是右摇杆的一个移动，诸如此类。这些Look Action都对应同样的响应逻辑，从而这样就能让我们的游戏可以用多种输入设备控制、又不必在自己的代码里写上一个巨大的switch语句来对应使用不同输入设备的分支。
+一个没有使用Action的写法：
+```
+  var look = new Vector2();
+
+    var gamepad = Gamepad.current;
+    if (gamepad != null)
+        look = gamepad.rightStick.ReadValue();
+
+    var mouse = Mouse.current;
+    if (mouse != null)
+        look = mouse.delta.ReadValue();
+```
+
+更好的写法是这样的：
+```
+myControls.gameplay.look.performed +=
+        context => look = context.ReadValue<Vector2>();
+```
+第二段代码是更好的原因是，这段代码与输入的来源无关，属于松依赖，且显然更简短。
+
+预定义的Action很少，只有Move，Look，Fire几个。可以通过Add binding来让其他的具体输入对应到这些Action。
+
+可以自己定义InputAction，且自定义的InputAction是可以序列化显示在Inspector当中的。
+
+
+![](./markdown_pic/uniani-103.jpg)
+这里我为我自己定义的InputAction添加了一个binding，其对应键盘下的空格键。
+双击这一行，可以看到除了Binding，还有Interactions和Processors两个条目。前者表示如何去按键，包括一些预选值，按下、长按、多次点按等；
+![](./markdown_pic/uniani-104.jpg)
+
+Processors如其意，是对于input action的一些加工和操作。比如axis deadzone就是轴向死区，这表示其在轴向超出某一限度时忽视输入。
+![](./markdown_pic/uniani-105.jpg)
+
+![](./markdown_pic/uniani-106.jpg)
+
+类InputAction（UnityEngine.InputSystem.InputAction）的描述是，A named Action that triggers callbacks in response to input，一个命名了的行动，这个行动会在输入时触发特定的回调函数(s).
+[Doc of Class InputAction](https://docs.unity.cn/Packages/com.unity.inputsystem@1.3/api/UnityEngine.InputSystem.InputAction.html?q=InputAction)
+
+InputAction的成员之一是`public InputActionMap actionMap;`。InputActionMap是一类命名了的集合，其中有大量的bindings和actions。所有这些actions都是InputAction类的，这些actions **are owned by 是属于**此InputActionMap的，反言之InputActionMap**拥有owns**一系列的actions。为了双向查找，每个InputAction都在成员`InputAction::actionMap`当中存放其主人的引用。map本身可以有一个null名字。map的设计本意是把一群相关的动作集中在一起，比如UI Action和Player Action显然有必要区分开；或者在步行模式下Actions遵循一种对应关系，在载具模式下则完全改变了，这两群Actions可以放在两张maps里。
+
+InputAction的另一个重要成员是`public ReadOnlyArray<InputBinding> bindings;`
+这正对应了我们在上面添加的bindings，也就是对一种输入的规范化表述。至此一个层级逻辑已经出现了：InputActionMap拥有InputAction(s)，InputAction拥有Bindings。
+
+考虑到，很多时候一个Action未必会带有超过一个Binding，因此更多地我们直接向InputActionMap添加一个以某一字符串描述的特定binding为内容的InputAction。听起来很绕，但其实就是这个方法`AddBinding(InputAction action, InputBinding binding)`,这是一个静态方法，定义在静态工具类`public static class InputActionSetupExtensions`下
+
+进而再讲一下InputBinding类，是对于上述绑定的一种描述。其最重要的成员是InputBinding::path,这是一个string，表达一个具体的输入。
+```
+new InputBinding { path = "<Mouse>/leftButton" }//鼠标左键
+```
+
+至此，我们可以把一个具体的输入绑定到一个InputAction，解决了InputAction的来路，下面就该考虑去路——如果按键触发了应该做些什么。
+
+InputAction类最核心的一个成员事件是`public event Action<InputAction.CallbackContext> performed`，这个事件就对应具体执行的逻辑。那么到此为止我们就可以上代码了。假设我们要写一段程序，规定一个InputAction，把鼠标左键点击绑定上去，这个输入对应的响应是在Debug打印“鼠标点击“。
+```
+using UnityEngine;
+using UnityEngine.InputSystem;
+public class PlayerTest : MonoBehaviour
+{
+    public PlayerInput playerInput;
+    void Start()
+    {
+        playerInput = this.GetComponent<PlayerInput>();
+        var targetAction = playerInput.actions.FindAction("Fire");
+        targetAction.performed += TargetAction_performed;    
+    }
+
+    private void TargetAction_performed(InputAction.CallbackContext obj)
+    {
+        Debug.Log("鼠标点击！");
+    }
+}
+```
+这里的playerInput就是我们一开始在空白GameObject上添加的PlayerInput组件，从PlayerInput的actions成员获得的量playerInput.actions是一个InputActionAssets类对象，严格来说项目拥有一个InputActionAssets，里面有若干个InputActionMaps，每个InputActionMaps又有若干个InputAction，每个InputAction又有一个或多个InputBindings。终于说清楚了。
+为啥这里去FindAction呢，这是因为左键点击这个事件本来就默认绑定在Fire这个Action下面，没必要自己再重新建立一个Action了。
+我们也可以加一个稍微复杂一丢丢的，我们在程序中绑定，让鼠标右键也对应Fire，从而让右键点下去也在屏幕上打印鼠标点击。
+```
+using UnityEngine.InputSystem;
+public class PlayerTest : MonoBehaviour
+{
+    // Start is called before the first frame update
+    public PlayerInput playerInput;
+
+    void Start()
+    {
+        //JumpAction.AddBinding("<Mouse>/LeftButton");
+        playerInput = this.GetComponent<PlayerInput>();
+        var targetAction = playerInput.actions.FindAction("Fire");
+        InputActionSetupExtensions.AddBinding(targetAction, "<Mouse>/RightButton");
+        targetAction.performed += TargetAction_performed;
+
+        //var pip = this.GetComponent<PlayerInput>();
+        //pip.onActionTriggered += Pip_onActionTriggered;      
+    }
+
+    private void TargetAction_performed(InputAction.CallbackContext obj)
+    {
+        Debug.Log("鼠标点击！");
+    }
+}
+```
+
+当然，既然我写在Start当中，这部分配置工作也完全可以在非运行时用Inspector里双击PlayerInput下的Actions来使用图形化界面配置。不过如果要在游戏中加入允许玩家自己定义映射关系，就需要通过代码来修改绑定关系和Action内容了。
+
+#### 通知行为notification behavior
+通知行为这个概念是Action概念引入的。通知行为是指目前InputSystem支持四种方式来书写对应输入的行为，包括：
+Send Messages，发送信息
+Broadcast Messages，广播消息
+Invoke Unity Events，激发Unity事件
+Invoke Csharp Events，激发C#事件
+
+![](./markdown_pic/uniani-101.jpg)
+上图中的Behaviour项就是用于规定这四种通知行为类型的。
+
+我首先以我最常使用的C#事件为例。假设我们把这里的Behaviour设置成Invoke Csharp Event，将会有三个定义好的C#事件供我们使用。其中最常用的是`onActionTriggered`,对应输入事件发生时。定义原文为：`public event Action<InputAction.CallbackContext> onActionTriggered`
+
+![](./markdown_pic/uniani-102.jpg)
+
+之前学习刘铁猛老师C#课程时候学到一个技巧，如果对一个事件的具体情况不太了解，尤其是不知道上述原文对这个事件的定义的时候，可以把这个事件写出来，后面加上+=，然后按下两次Tab，VisialStudio这时候就会为我们补齐一个右值的函数的定义：
+```
+void Start()
+    {
+        var pip = this.GetComponent<PlayerInput>();
+        pip.onActionTriggered += Pip_onActionTriggered; //在+=后Tab两次
+    }
+
+    private void Pip_onActionTriggered(InputAction.CallbackContext obj)
+    {
+        //content
+    }
+```
+#### 输入的回调参数CallbackContext 
+参数InputAction.CallbackContext obj被称为回调上下文。我们首先在上面的程序基础上来胡乱写一写尝试一下：
+```
+public class PlayerTest : MonoBehaviour
+{
+    public PlayerInput playerInput;
+
+    void Start()
+    {
+
+        playerInput = this.GetComponent<PlayerInput>();
+        playerInput.onActionTriggered += PlayerInput_onActionTriggered;
+    }
+
+    private void PlayerInput_onActionTriggered(InputAction.CallbackContext obj)
+    {
+        Debug.Log("PlayerInput_onActionTriggered was called");
+    }
+}
+```
+我来口述一下这个程序的运行结果。凡是我输入键盘、滑动鼠标，都会疯狂地在Debug里打印大量的`PlayerInput_onActionTriggered was called`。这也合理，这样写等于说是任何InputAction都会唤起`PlayerInput_onActionTriggered()`,从而打印大量内容。
+
+InputAction.CallbackContext是定义在InputAction内部的一个聚合类，这个类我们也简单介绍一下。成员action就是当前发生的InputAction的引用，我们可以使用action成员来判别事件到底对应了什么InputAction：
+```
+private void PlayerInput_onActionTriggered(InputAction.CallbackContext obj)
+    {
+        if(obj.action.name == "Fire")
+        {
+            Debug.Log("PlayerInput_onActionTriggered was called");
+        }
+        
+    }
+```
+这样就不会生成海量的打印了，不过一次点击依然不仅仅会产生一条记录。这里我们就要考察Fire的Interaction了，默认的Fire Action的Interaction里是空白的。
+![](./markdown_pic/uniani-107.jpg)
+注意，Fire Action有Interaction设置，下面的每个绑定也有。这里我们仅仅修改这个绑定对应的Interaction。
+我们可以这样修改：
 
 
