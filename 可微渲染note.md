@@ -66,19 +66,3 @@ backward rendering:指的是根据2d image重构Mesh乃至Texture的渲染过程
 [Differentiable Monte Carlo Ray Tracing through Edge Sampling](https://click.endnote.com/viewer?doi=10.1145%2F3272127.3275109&token=WzM2ODQ2MjYsIjEwLjExNDUvMzI3MjEyNy4zMjc1MTA5Il0.JrrTvvCwxgqGQRo2ozlaTdnCrD8)是使用光追做的逆渲染的大成之作。我们研究光栅化方案，故不作讨论。
 
 [Soft Rasterizer: A Differentiable Renderer for Image-Based 3D Reasoning](https://ieeexplore.ieee.org/document/9008817)是提出`SoftRas`的原文。
-
-
-
-## What's 
-
-## 梳理现有工作
-
-1.在做C++ 的软渲染光栅器。能够完成MVP乃至视口变换，实现了几个简单的shader(normal，texture，phong，mipmap)
-bilinear发生在纹素大像素小的时候， 此时像素中心落在纹素里，可以用附近的四个纹素去横纵插值得出当前像素的feature
-bicubic指的是运用了mipmap之后的情况。
-
-2.学习Unity&3dsMax制作模型，尝试学习动画
-Unity 通过AnimatorController控制动画，AC是一个对象的组件，能够控制这一组件的运动。AC中有许多的状态State，每个状态又有绑定的MotionClip，这个Clip动画剪辑就是Unity控制动画的基本单元。
-在AC的状态机中编写状态转移条件，并且在每个状态之上绑定脚本，就能用脚本编写逻辑控制人物的运动了。
-
-3.
