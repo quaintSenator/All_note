@@ -50,7 +50,7 @@ catch (Exception ex)
 
 此外，还有一种using写法，可以自动调用Dispose
 ```
-Using ( var obj = new SomeIDisposableObject ) 
+using ( var obj = new SomeIDisposableObject ) 
 {
     // ...
 } 

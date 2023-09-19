@@ -625,3 +625,51 @@ glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 为了使用纹理，我们需要把png等图片格式文件的内容规格化读入内存，形成一个vec4数组。
 参考[log官网的介绍](https://learnopengl-cn.github.io/01%20Getting%20started/06%20Textures/#stb_imageh)学习获取stb_image.h
 
+## SSAO
+SSAO这个章节，我要探讨的最主要问题是：如何把SSAO与更先进的光照模型结合起来？除此以外，还会探讨SSAO算法的原理和SSAO纹理的验证。
+
+在LOG课程中，SSAO被应用于简单的布林冯光照模型：
+```
+    vec3 FragPos = texture(gPositionDepth, TexCoords).rgb;
+    vec3 Normal = texture(gNormal, TexCoords).rgb;
+    vec3 Diffuse = texture(gAlbedo, TexCoords).rgb;
+    float AmbientOcclusion = texture(ssao, TexCoords).r;
+    
+    // Then calculate lighting as usual
+    vec3 ambient = vec3(0.3 * AmbientOcclusion);
+    vec3 lighting  = ambient; 
+    vec3 viewDir  = normalize(-FragPos); // Viewpos is (0.0.0)
+    // Diffuse
+    vec3 lightDir = normalize(light.Position - FragPos);
+    vec3 diffuse = max(dot(Normal, lightDir), 0.0) * Diffuse * light.Color;
+    // Specular
+    vec3 halfwayDir = normalize(lightDir + viewDir);  
+    float spec = pow(max(dot(Normal, halfwayDir), 0.0), 8.0);
+    vec3 specular = light.Color * spec;
+    // Attenuation
+    float distance = length(light.Position - FragPos);
+    float attenuation = 1.0 / (1.0 + light.Linear * distance + light.Quadratic * distance * distance);
+    diffuse *= attenuation;
+    specular *= attenuation;
+    lighting += diffuse + specular;
+```
+在布林冯模型中，AO仅仅被乘在ambient项，而对于漫反射和镜面反射项都没有影响。
+
+而在IBL模型中，AO虽然也被乘在ambient项上，但是`IBLcolor = ambient + L0;`, 对ambient项乘上AO事实上影响了镜面反射和漫反射。
+PBR模型会提供一个AO贴图，我们此前的PBR模型也是采样这个AO贴图来获取AO。
+
+那么这个时候，textureAO和SSAO应该如何应用进我们的光照模型呢？
+
+AO归根到底就是一种凹陷的几何状态，凹陷的位置会变得更暗，其他位置则显得不那么暗。PBR材质提供了一种精密的AO，这种AO在DCC中制作，利用光追离线预计算形成，所以如果能够使用textureAO，那自然是最好的；
+
+但是由于美术生产的粒度一般就是一个单一模型，因此AO贴图也是针对单一物体的。场景中的物体堆叠摆放也会形成凹陷区域，比如一堵墙立在地面上，墙角就是一条凹陷的几何区域，那个位置往往我们期待看到一个更暗的线条。这种凹陷是textureAO没有办法在DCC生产中得出的，因为无法预料资产会如何被摆放在场景中，场景中又有哪些其他的物体。
+
+因此我们需要SSAO。
+
+所以我立刻想到一个办法(我并不知道此前有没有人这样做)，能不能对于我们的模型绘制应用textureAO，但是在没有模型的位置应用SSAO？
+
+目前我们的场景像这个样子：有一群石狮子，还有一个木制花纹的平台：
+![](./markdown_pic/opengl-23.jpg)
+如果要执行上述想法，那么只能对平台在画面上展示的那一部分进行ssao的绘制。可是平台目前没有采用延迟渲染，而是采用一个单独的pass绘制用简单布林冯绘制的。
+
+有一个比较勇敢的做法，我们不如把平板plane也彻底改造成PBR，从而让场景能够用一套流程去绘制，不必再为狮子使用一套流程、为平板单独再使用一套流程。

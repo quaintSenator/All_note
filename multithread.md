@@ -197,14 +197,5 @@ atomic的本质是一个T类型的量，但这个量附加了这样的机制：�
 
 atomic的拷贝构造函数是删除的，同样拷贝赋值运算符也是禁止的。	
 
-### std::atomic::load(),std::atomic::store()
+### std::atomic::load(), std::atomic::store()
 顾名思义，用于读和写原子量的两个函数。
-
-
-
-
-
-
-
-
-          
