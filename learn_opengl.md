@@ -1,4 +1,4 @@
-## learnOpenGL学习笔记
+# learnOpenGL学习笔记
 如果仅仅看第一节的内容，learn opengl几乎是我跟过所有计算机相关内容里面最棒的教程。大多数的教程不会细致到这种地步，只要跟着learnopengl的[创建窗口](https://learnopengl-cn.github.io/01%20Getting%20started/02%20Creating%20a%20window/)和[hello 窗口](https://learnopengl-cn.github.io/01%20Getting%20started/03%20Hello%20Window/)两节的内容，一个没有接触过任何图形相关内容的小白也几乎不会碰到任何教程中没有涵盖的问题。
 
 如果确实还是发生问题了，仔细检查有没有紧跟上述两个链接对应教程的每一个步骤。有些地方并不会为一个步骤附加一个图片，因此可能你略过了一两行，因此少配置了两个配置项。
@@ -628,6 +628,13 @@ glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 ## SSAO
 SSAO这个章节，我要探讨的最主要问题是：如何把SSAO与更先进的光照模型结合起来？除此以外，还会探讨SSAO算法的原理和SSAO纹理的验证。
 
+AO归根到底就是一种凹陷的几何状态，凹陷的位置会变得更暗，其他位置则显得不那么暗。PBR材质提供了一种精密的AO，这种AO在DCC中制作，利用光追离线预计算形成，所以如果能够使用textureAO，那自然是最好的；
+
+但是由于美术生产的粒度一般就是一个单一模型，因此AO贴图也是针对单一物体的。场景中的物体堆叠摆放也会形成凹陷区域，比如一堵墙立在地面上，墙角就是一条凹陷的几何区域，那个位置往往我们期待看到一个更暗的线条。这种凹陷是textureAO没有办法在DCC生产中得出的，因为无法预料资产会如何被摆放在场景中，场景中又有哪些其他的物体。
+
+因此我们需要SSAO。
+
+### 如何把SSAO应用在PBR上
 在LOG课程中，SSAO被应用于简单的布林冯光照模型：
 ```
     vec3 FragPos = texture(gPositionDepth, TexCoords).rgb;
@@ -660,12 +667,6 @@ PBR模型会提供一个AO贴图，我们此前的PBR模型也是采样这个AO�
 
 那么这个时候，textureAO和SSAO应该如何应用进我们的光照模型呢？
 
-AO归根到底就是一种凹陷的几何状态，凹陷的位置会变得更暗，其他位置则显得不那么暗。PBR材质提供了一种精密的AO，这种AO在DCC中制作，利用光追离线预计算形成，所以如果能够使用textureAO，那自然是最好的；
-
-但是由于美术生产的粒度一般就是一个单一模型，因此AO贴图也是针对单一物体的。场景中的物体堆叠摆放也会形成凹陷区域，比如一堵墙立在地面上，墙角就是一条凹陷的几何区域，那个位置往往我们期待看到一个更暗的线条。这种凹陷是textureAO没有办法在DCC生产中得出的，因为无法预料资产会如何被摆放在场景中，场景中又有哪些其他的物体。
-
-因此我们需要SSAO。
-
 所以我立刻想到一个办法(我并不知道此前有没有人这样做)，能不能对于我们的模型绘制应用textureAO，但是在没有模型的位置应用SSAO？
 
 目前我们的场景像这个样子：有一群石狮子，还有一个木制花纹的平台：
@@ -673,3 +674,254 @@ AO归根到底就是一种凹陷的几何状态，凹陷的位置会变得更暗
 如果要执行上述想法，那么只能对平台在画面上展示的那一部分进行ssao的绘制。可是平台目前没有采用延迟渲染，而是采用一个单独的pass绘制用简单布林冯绘制的。
 
 有一个比较勇敢的做法，我们不如把平板plane也彻底改造成PBR，从而让场景能够用一套流程去绘制，不必再为狮子使用一套流程、为平板单独再使用一套流程。
+
+很快我就做好了这件事情，现在的plane也是一个Mesh，并且对于一个场景，当中的Plane和Lion都是可以用同一套着色流程进行绘制的。
+
+![](./markdown_pic/opengl-25.jpg)
+顺带一提，你可能会发现在上一张图中，狮子的个别部位会出现一个不自然的阴影，那是因为我在法线贴图采样后随手进行了一个normalize，和TBN空间转换形成了一些冲突，我已经改正了这部分。
+然后，我们就可以对于整个场景进行Gbuffer的写入：
+
+GPositionDepth, 其中a通道写的是线性深度:
+![](./markdown_pic/opengl-26.jpg)
+GNormal:
+![](./markdown_pic/opengl-27.jpg)
+如你所见，为了适配PBR的一套绘制方案，我改了一个有法线贴图的砖块花纹地面。
+
+接下来就是绘制SSAO纹理了。
+
+### Debug 错误的SSAO绘制 
+我完全拷贝了LOG的SSAO绘制着色过程，但是始终出错。
+
+我直接输出了SampleDepth发现是纯1，于是我改成了输出Kernel当中一个Sample的sampleDepth的十分之一。
+```cpp
+for(int i = 0; i < kernelSize; ++i)
+    {
+        // get sample position
+        vec3 sample = TBN * samples[i]; // From tangent to view-space
+        sample = fragPos + sample * radius; 
+        
+        // project sample position (to sample texture) (to get position on screen/texture)
+        vec4 offset = vec4(sample, 1.0);
+        offset = projection * offset; // from view to clip-space
+        offset.xyz /= offset.w; // perspective divide
+        offset.xyz = offset.xyz * 0.5 + 0.5; // transform to range 0.0 - 1.0
+        
+        // get sample depth
+        float sampleDepth = texture(gPositionDepth, offset.xy).a; // Get depth value of kernel sample       
+        occlusion = sampleDepth / 10;
+    }
+    //occlusion = 1.0 - (occlusion / kernelSize);
+    FragColor = vec4(occlusion, occlusion, occlusion, 1.0);
+```
+![](./markdown_pic/opengl-28.jpg)
+输出这个形成的摩尔纹，我认为主要是平铺的旋转向量纹理造成的。这个输出告诉我们一件事：如果对gPositionDepth进行采样，得到的sampleDepth，内容是超过1的深度，是正值。
+然后我再输出一下sample.z的值：
+```cpp
+for(int i = 0; i < kernelSize; ++i)
+    {
+        // get sample position
+        vec3 sample = TBN * samples[i]; // From tangent to view-space
+        sample = fragPos + sample * radius; 
+      
+        occlusion = sample.z;
+    }
+```
+![](./markdown_pic/opengl-29.jpg)
+```cpp
+glm::vec3 sample(randomFloat(gen) * 2.0 - 1.0, randomFloat(gen) * 2.0 - 1.0, randomFloat(gen));
+        //x [-1, 1] y [-1, 1] z[0, 1]
+```
+sample输入给着色器的时候是单位半球内的点，这个单位半球是世界空间的。我们希望把这个坐标改为：Z值表示在旋转纹理向量方向上的偏移。
+按照上面的公式`sample = fragPos + sample * radius`，最终的sample.z 其实是fragPos.z增加一个偏移量，这个偏移量也分布在[-1, 1]，所以至少会呈现出大体上的近处小远处大，不信我们来看一下GBuffer中的Position图：
+![](./markdown_pic/opengl-30.jpg)
+![](./markdown_pic/opengl-31.jpg)
+可以看到平台远处的点，z = -3.65234; 近处的点z = 2.55469。这个GBuffer的z值是平台最原始的世界坐标。查看一下ssao的纹理生成着色器，可以发现，FragPos从GBuffer中取出来之后没有经过任何处理就开始于sample叠加了。这样一来，这个sample.z就不再是简单的近处接近0远处接近1，或者是反过来了——FragPos.z在很近处是大于0的，越近越大；在平台中央位置是接近0的，而在较远处则一直是0，越远处会是绝对值越大的负值，但一直会被截断到0. 这就是为什么我们输出sample.z的时候会得到这样的效果：
+![](./markdown_pic/opengl-29.jpg)
+
+再回看一下sampleDepth是怎么算出来的。首先把sample通过左乘透视矩阵 + 透视除法 + 线性映射成[0, 1]，得到的点xy表示在屏幕上uv、z表示sample点深度。此时，按照这个xy采样gBuffer中的GPositionDepth，取w，也就是线性深度，其值在[near, far]。这个位置记录着sample映射到的位置所覆盖到的那个像素在G pass中写入的深度，是一个在屏幕上分布在当前fragment邻近的一个fragment。
+
+我的困惑是，按照原代码，sampleDepth是一个线性深度，取负值后sampleDepth in [-far, -near]
+他的比较对象sample.z = FragPos.z + tbnsample.z，
+FragPos.z in [-5, 5]，是我们设置的平板顶点范围
+tbnsample.z in [-1, 1]
+从而sample.z in [-6, 6]
+这样一来，相当大一部分的点是根本没有办法显示在ssao纹理的。试想一下，之前说过平面更近的那部分的fragPos.z都是正的，这就造成最终的sample.z也几乎都是正的，这样导致了整个场景一大半的顶点注定无法呈现在ssao纹理中，他们必然有sample.z > sampleDepth, 被判定为不在oa中，显示为ao中的纯黑。
+
+公布答案：这套办法拿到的FragPos并不是MVP屏幕空间，而是在MV 观察空间的坐标。在观察空间里，fragment的深度在[-far, -near]。这是一个验证过的结论：写一段这样的程序
+```cpp
+//fragPos在GPass是view空间坐标
+occlusion = -fragPos.z / 10;
+FragColor = vec4(occlusion, occlusion, occlusion, 1.0);
+```
+![](./markdown_pic/opengl-32.jpg)
+
+这也正是为什么要在GPass计算线性深度，并且把这个深度存到GPositionDepth的alpha通道当中。线性深度在[near, far]位置，这里只要通过
+```cpp
+    float sampleDepth = -texture(gPositionDepth, offset.xy).a;
+    //[near, far] -> [-far, -near]
+```
+这也是为什么判断语句是这样写的：
+```cpp
+    occlusion += sampleDepth >= sample.z ? 1.0 : 0.0;
+```
+对于负数而言，若sampleDepth更大，表示sampleDepth距离near平面更近，从而离摄像机更近。我们之前分析过，处于遮罩内的samples，sample.z在“墙体之内”，所以sample.z距离摄像机比那个位置的fragment更远，sampleDepth距离摄像机更近，也就对上了，`sampleDepth >= sample.z`表示处于遮罩当中——要考虑到有负数比大小的反转不等号。
+
+
+# OpenGL代码的重构
+要把Shader定义成C++类，最重要的任务是在Shader派生类中规定出一个Shader依赖哪些资源、需要做哪些准备。为了使用一个Shader，可能需要做的前置配置包括：
+1. 配置好的模型顶点，通过VAO传入
+2. 配置好的Uniform资源，通过Shader::Setxx函数同步给GPU
+3. FBO相关信息，包括把物体绘制到哪里去（FBO的颜色附件和深度附件等）
+4. 其他OpenGL状态的更改，包括
+
+## Shaders的资源依赖
+|Shader Name|Uniforms|功能&描述|
+|--|--|--|
+|convolution_radiance_xs|uniform samplerCube environmentCubemap;<br/>uniform mat4 projection;<br/>uniform mat4 view;|在prepareIBL阶段，用于生成漫反射辐照度贴图|
+|direct_light_pbr_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform mat4 model;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 projection;<br/>uniform vec3 lightPos;<br/>uniform vec3 cameraPos;|直接光照的pbr，目前已经copy进延迟渲染的着色器，没有应用|
+|drawDepth_xs|uniform mat4 lightVP;<br/>uniform mat4 model;|绘制shadowmap的着色器|
+|hdr_capture_skybox_xs|uniform sampler2D equirectangularMap;<br/>uniform mat4 projection;<br/>uniform mat4 view;|从HDR中抓取出六面天空盒的着色器，这个draw的过程稍微有点复杂，因为每一次都要调整摄像机方向|
+|geometry_pass_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 perspective;|延迟渲染的Geometrypass，目前只绘制了lions，期待能够兼容绘制plane和其他生成模型|
+|IBL_xs|uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 projection;<br/>uniform vec3 lightPos[5];<br/>uniform vec3 cameraPos;<br/>uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform samplerCube irradianceMap;<br/>uniform samplerCube prefilterMap;<br/>uniform sampler2D brdfLUT;<br/>uniform vec3 cameraPos;|用于生成drawModelShader，现在用于在前向渲染模式下绘制模型，同样目前暂时不能用于绘制生成模型|
+|lighting_pass_xs|uniform sampler2D G_FragPos;<br/>uniform sampler2D G_Normal;<br/>uniform sampler2D G_Albedo;<br/>uniform sampler2D G_AO;<br/>uniform samplerCube irradianceMap;<br/>uniform samplerCube prefilterMap;<br/>uniform sampler2D brdfLUT;<br/>uniform vec3 lightPos[9];<br/>uniform vec3 lightColor[9];<br/>uniform vec3 cameraPos;|延迟渲染的光照阶段，目前用于绘制lions。地板的绘制并不包含。|
+|lut_xs|无|生成IBL中镜面反射项的lookup texture|
+|multilight_plane_xs|uniform sampler2D planeTexture;<br/>uniform vec3 lightPos[100];<br/>uniform vec3 lightColor[100];<br/>uniform vec3 viewPos;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 perspective;|用于在延迟渲染渲染模式下，来绘制大量光源；其中的lightPos的长度实际上已经没有100，而是改成了9|
+|plane_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D shadowMap[5];<br/>uniform vec3 lightPos[5];<br/>uniform vec3 viewPos;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 prospective;<br/>uniform mat4 lightVP[5];|用于在前向渲染渲染模式下绘制平面|
+|prefilter_hdr_xs|uniform float roughness;<br/>uniform samplerCube environmentMap;<br/>uniform mat4 projection;<br/>uniform mat4 view;|用于生成HDR的预滤波贴图|
+|skybox_xs|uniform samplerCube skybox;<br/>uniform mat4 projection;<br/>uniform mat4 view;|用于在Scene::DrawEnv进行天空盒的绘制|
+|ssao_xs|uniform sampler2D gPositionDepth;<br/>uniform sampler2D gNormal;<br/>uniform sampler2D texNoise;|环境光遮罩生成，目前只针对lions。必须提供把平板也绘制进SSAO的方法|
+
+我们可以看到，没有两个Shader，他们的依赖资源是完全一样的。所以在这种架构下，必须以新起类的方式来定义上述13个新的Shader派生类。我觉得我们非常需要进一步的抽象。
+
+## GeometryShader的设计
+我初步进行了这样一个设计：
+```cpp
+class Shader
+{
+public:
+    unsigned int ID;
+    std::vector<ShaderAsset<int>> asset_sampler2D_slots;
+    std::vector<ShaderAsset<int>> asset_samplerCube_slots;
+    std::vector<ShaderAsset<glm::mat4>> asset_mat4_slots;
+    std::vector<ShaderAsset<glm::vec3>> asset_vec3_slots;
+    //...
+}
+```
+ShaderAsset被定义为一个模板类，其中保有一个T类型成员data，存储实际的内容
+我们定义一些新的类，比如GeometryShader，就会继承于Shader：
+```cpp
+class GeometryShader : public Shader
+{
+public:
+    GeometryShader() : Shader()
+    {
+        initialize_slots(4, 0, 3, 0);
+        asset_sampler2D_slots[0].name_in_shader = "texture_diffuse1";
+        asset_sampler2D_slots[1].name_in_shader = "texture_normal1";
+        asset_sampler2D_slots[2].name_in_shader = "texture_maskmap";
+        asset_sampler2D_slots[3].name_in_shader = "texture_AO1";
+
+        asset_mat4_slots[0].name_in_shader = "model";
+        asset_mat4_slots[1].name_in_shader = "view";
+        asset_mat4_slots[2].name_in_shader = "perspective";
+    }
+};
+```
+之后使用的时候，由于所有的资源在slots中初始都是未完成状态，必须要进行所谓资源填入。但是资源填入可能发生在GeometryShader构造后，也就是说我还是需要构造GeometryShader并让GeometryShader类的用户去填入Shader配置信息，这正是我们一开始就极力避免的事情，尽可能不要让GeometryShader的用户不得不了解一些Shader类的内部组织，并针对性地填写数据。那样太糟了。
+
+能不能让GeomtryShader类聪明地向用户索取这些值？
+有一种办法，就是直接定义`GeometryShader`的构造器需要七个参数，依次是上面这些内容。但是这样写，还是需要用户把这七个值先准备好，一一填写到其中；而且，每一个Shader的构造器参数列表都不一样，且非常长，我想这未必是一种好的写法。
+
+还有一种办法：尽量在继承体系中预先识别一些公用的参数。比如view和perspective，都是从camera这边过来的；上面的texture0-3，都是从模型的textures里读出来的。
+我们首先可以加一层GlobalCameraShader：
+```cpp
+class GlobalCameraShader : public Shader
+{
+    GlobalCameraShader()
+    {
+        initialize_slots(4, 0, 3, 0);
+        asset_mat4_slots[0].name_in_shader = "model";
+        asset_mat4_slots[1].name_in_shader = "view";
+        asset_mat4_slots[1].SetAsset(Tool::camera.GetViewMatrix());
+        asset_mat4_slots[2].name_in_shader = "perspective";
+        asset_mat4_slots[2].SetAsset(Tool::camera.GetCameraPerspective());
+    }
+};
+class GeometryShader : public GlobalCameraShader
+{
+public:
+    GeometryShader()
+    {
+        asset_sampler2D_slots[0].name_in_shader = "texture_diffuse1";
+        asset_sampler2D_slots[1].name_in_shader = "texture_normal1";
+        asset_sampler2D_slots[2].name_in_shader = "texture_maskmap";
+        asset_sampler2D_slots[3].name_in_shader = "texture_AO1";
+    }
+    virtual ~GeometryShader()
+    {
+        
+    }
+};
+```
+## GeometryShader自始至终做了哪些事情完成了绘制
+1. 设置FBO gbuffer，以及RBO
+2. use shader
+3. set perspective & view 
+4. 逐models、逐mesh地遍历，调用Mesh::Draw
+    4.1 Mesh::Draw采用了shader作为参数，对shader写入textures
+    4.2 Bind VAO
+    4.3 DrawElements，依据Mesh::incides
+![](./markdown_pic/opengl-24.jpg)
+
+FBO设置 -> GeometryShader::PrepareFBO
+use shader -> 都可以
+
+set perspective & view -> `GlobalCameraShader::GlobalCameraShader()`, 写在`asset_mat4_slots[]` 但没有set; 目前交给了GlobalCameraShader
+set model -> `Model::draw`负责
+
+set textures -> textures这个问题比较复杂，原本的texture在过去版本内，textures信息是这样的：
+1. 实际模型 [Model::loadModel] --> [写入到Mesh::textures] --> [Mesh::Draw直接setTexture]
+2. 生成模型 [Mesh::Mesh(int)调用] --> [`Mesh::Build_generated_model_plane()` 写入Mesh::textures的path] --> [Model::Model(int) texture_ref.id = `TextureFromFile(texture_ref.path, false)`是实际Load, 根据`Model::meshes[i].textures[j].id`] --> [Scene::DrawPlane依照`Scene::plane.meshes[0].textures[0].id` SetTexture]
+
+Bind VAO -> Mesh::Draw负责
+DrawElements -> Mesh::Draw负责
+
+接下来的问题就是，如何进行绘制？绘制函数是谁的成员函数，又在什么语境下被调用？
+我们沿袭下来的代码已经有：
+```cpp
+void Draw(Shader& shader, bool isFBX, bool isDefered = false);
+```
+这个函数在之前需要负责use Shader；对Shader进行textures的Set；绑定Mesh::vao并且调用glDrawElements完成绘制。毕竟我们需要用到的textures和vao都是存放在Mesh里面的，所以把Draw放在Mesh下是有合理之处的。
+
+然而现在的Draw不能完成Shader的配置，而是完成了一部分shader的配置。shader的model、view等内容都是Mesh类的用户在调用MeshDraw之前写入的。又是一个糟糕的设计。
+
+我们现在指出：规定一个Shader类，这个Shader类自己索取自己需要的信息，只有在最万不得已的时候向Shader类的用户要求通过参数去补充信息。
+
+目前的GeometryShader还不知道texture_diffuse1等几张图存在哪里，但事实上他们就存在Model中，可以用
+```cpp
+Model some_model;
+some_model.meshes[i].texture[0]//...
+```
+这种写法进行texture的获取。更令人满意的是，在我们沿袭来的旧代码框架下，Mesh保存textures总是以四位的掩码顺序进行texture的存储：
+```cpp
+if(hasDiffuse())
+    shader.setTexture(string("texture_diffuse1"), textures[0].id, 0);
+if(hasNormal())
+    shader.setTexture(string("texture_normal1"), textures[1].id, 1);
+if(hasMaskMap())
+    shader.setTexture(string("texture_maskmap"), textures[2].id, 2);
+if(hasAO())
+    shader.setTexture(string("texture_AO1"), textures[3].id, 3);
+```
+
+那我们不妨就沿用之前的做法：让`Mesh::Draw()`原本的代码继续负责*use Shader；对Shader进行textures的Set；绑定Mesh::vao并且调用glDrawElements完成绘制；*
+然后我们补充对于Shader的动态绑定：
+```cpp
+void Mesh::Draw(Shader& shader, bool isFBX, bool isDefered = false){
+    //...
+    shader.Draw();//动态绑定
+    //...
+}
+```
+在这个`Shader::Draw`（注意未必实际上就是Shader::Draw，也可能是多态的其他版本，这里只是用这个表达）负责剩下来的工作：
+
