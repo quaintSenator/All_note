@@ -766,6 +766,24 @@ FragColor = vec4(occlusion, occlusion, occlusion, 1.0);
 ```
 对于负数而言，若sampleDepth更大，表示sampleDepth距离near平面更近，从而离摄像机更近。我们之前分析过，处于遮罩内的samples，sample.z在“墙体之内”，所以sample.z距离摄像机比那个位置的fragment更远，sampleDepth距离摄像机更近，也就对上了，`sampleDepth >= sample.z`表示处于遮罩当中——要考虑到有负数比大小的反转不等号。
 
+## MSAA
+openGL对于MSAA的支持是良好的，我们只需要进行一些基础的配置更改就能应用MSAA。如果仅仅要修改默认帧缓冲的绘制方案为MSAA，只需要在创建窗口时候改用：
+```cpp
+glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+glfwWindowHint(GLFW_SAMPLES, 4);
+
+glEnable(GL_MULTISAMPLE);
+```
+就可以完成抗锯齿的启动了。这个写法实际上是告诉glfw在创建窗口时，我们希望使用一个4样本的多重采样缓冲来创建我们的窗口，并启用GL_MULTISAMPLE。
+
+不过，直接这样做并不能使我们的PBR场景明显地获得改善：
+![](./markdown_pic/opengl-33.jpg)
+这是因为，延迟渲染采用的GBuffer如果没有应用MSAA，那么锯齿就已经存有在GBuffer的各个附件里了：
+![](./markdown_pic/opengl-34.jpg)
+![](./markdown_pic/opengl-35.jpg)
+于是我们必须对Geometry Pass的绘制过程加以干预，从而更早应用MSAA。
+
+
 
 # OpenGL代码的重构
 要把Shader定义成C++类，最重要的任务是在Shader派生类中规定出一个Shader依赖哪些资源、需要做哪些准备。为了使用一个Shader，可能需要做的前置配置包括：
@@ -773,6 +791,7 @@ FragColor = vec4(occlusion, occlusion, occlusion, 1.0);
 2. 配置好的Uniform资源，通过Shader::Setxx函数同步给GPU
 3. FBO相关信息，包括把物体绘制到哪里去（FBO的颜色附件和深度附件等）
 4. 其他OpenGL状态的更改，包括
+
 
 ## Shaders的资源依赖
 |Shader Name|Uniforms|功能&描述|
