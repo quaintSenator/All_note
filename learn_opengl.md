@@ -783,21 +783,28 @@ glEnable(GL_MULTISAMPLE);
 ![](./markdown_pic/opengl-35.jpg)
 于是我们必须对Geometry Pass的绘制过程加以干预，从而更早应用MSAA。
 
+off-screen MSAA, 主要针对的是OpenGL的颜色附件：
+```cpp
+glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, tex);
+glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_RGB, width, height, GL_TRUE);
+glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
+```
+创建纹理之初，就要把纹理创建成`GL_TEXTURE_2D_MULTISAMPLE`而非`GL_TEXTURE_2D`
 
+一个比较麻烦的问题在于，如果一个纹理是多采样的，随后把这个多采样的纹理作为FBO的颜色附件，这种附件是不可以直接用于采样的。我们把GBuffer相关的所有纹理都改成了多采样纹理，此时还需要进行纹理的Resolve。
 
 # OpenGL代码的重构
 要把Shader定义成C++类，最重要的任务是在Shader派生类中规定出一个Shader依赖哪些资源、需要做哪些准备。为了使用一个Shader，可能需要做的前置配置包括：
 1. 配置好的模型顶点，通过VAO传入
 2. 配置好的Uniform资源，通过Shader::Setxx函数同步给GPU
 3. FBO相关信息，包括把物体绘制到哪里去（FBO的颜色附件和深度附件等）
-4. 其他OpenGL状态的更改，包括
-
+4. 其他OpenGL状态的更改，比如改变深度检测函数
 
 ## Shaders的资源依赖
 |Shader Name|Uniforms|功能&描述|
 |--|--|--|
 |convolution_radiance_xs|uniform samplerCube environmentCubemap;<br/>uniform mat4 projection;<br/>uniform mat4 view;|在prepareIBL阶段，用于生成漫反射辐照度贴图|
-|direct_light_pbr_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform mat4 model;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 projection;<br/>uniform vec3 lightPos;<br/>uniform vec3 cameraPos;|直接光照的pbr，目前已经copy进延迟渲染的着色器，没有应用|
+|direct_light_pbr_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 projection;<br/>uniform vec3 lightPos;<br/>uniform vec3 cameraPos;|直接光照的pbr，目前已经copy进延迟渲染的着色器，没有应用|
 |drawDepth_xs|uniform mat4 lightVP;<br/>uniform mat4 model;|绘制shadowmap的着色器|
 |hdr_capture_skybox_xs|uniform sampler2D equirectangularMap;<br/>uniform mat4 projection;<br/>uniform mat4 view;|从HDR中抓取出六面天空盒的着色器，这个draw的过程稍微有点复杂，因为每一次都要调整摄像机方向|
 |geometry_pass_xs|uniform sampler2D texture_diffuse1;<br/>uniform sampler2D texture_normal1;<br/>uniform sampler2D texture_maskmap;<br/>uniform sampler2D texture_AO1;<br/>uniform mat4 model;<br/>uniform mat4 view;<br/>uniform mat4 perspective;|延迟渲染的Geometrypass，目前只绘制了lions，期待能够兼容绘制plane和其他生成模型|
@@ -882,6 +889,7 @@ public:
     }
 };
 ```
+
 ## GeometryShader自始至终做了哪些事情完成了绘制
 1. 设置FBO gbuffer，以及RBO
 2. use shader
@@ -905,6 +913,8 @@ set textures -> textures这个问题比较复杂，原本的texture在过去版�
 Bind VAO -> Mesh::Draw负责
 DrawElements -> Mesh::Draw负责
 
+
+## Draw在哪里，谁来完成
 接下来的问题就是，如何进行绘制？绘制函数是谁的成员函数，又在什么语境下被调用？
 我们沿袭下来的代码已经有：
 ```cpp
