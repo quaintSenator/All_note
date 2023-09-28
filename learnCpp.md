@@ -260,11 +260,6 @@ Part 2：构建一个继承自虚类的类的虚表(已经在前面讨论，纵�
   - 倘若当前虚函数覆盖了一个虚表中的虚函数，抹去其地址改为当前函数的成员函数地址，这是经典的override覆盖
   - 倘若当前虚函数不与任何虚表中已有的函数同名，这是一个新的虚函数，在表尾开新项，写入成员函数地址
 
-### 回答最初的问题：运行时bptr->print()背后的行为
-1. bptr是Base*类型，这是一个虚类。首先，如果存在`Base::print()`是非虚拟函数，不必继续查询；
-2. ?尚未写完
-
-
 ### 另一个脑洞：编译时多态又是怎样的
 ```cpp
 class Base{
@@ -285,3 +280,177 @@ int main(){
 }
 ```
 这种情况下，动态绑定没有发生。bptr是Base*，那并不是一个虚类，因此程序会直接转而查询Base的成员表找到`Base::print()`，直接执行。
+
+
+# C++的编译
+很多人会认为C++ Primer是一本远远足够新手入门C++的读物，但不可否认的是，Primer对于编译的过程鲜有介绍。编译是如何进行的，这个Topic似乎是程序员们相对不愿意面对的，我在学生阶段经常听到关于老师出题考编译相关细节的抱怨。
+Primer关于这部分的介绍，以我的第五版为例，集中在2.6 6.1两节。由于模板是一个编译层面的特性，第十六章也会涉及一点。即便看完这些部分，有些时候依然会发生意料之外的错误。
+随着我的C++开发，我发现一直不在意的`#include` 经常出错, 这些错误追查最后总是发现一个底层的认知错误，耽误了大量的时间。因此我整理了这一个部分，意在讨论这些头文件组织、引入、定义和声明、使用模板引发的错误。
+## 为什么使用头文件
+早在学习C++的一开始，一个教条就在我们每一个人的脑子里了：
+*应该把类定义在头文件中，然后再同名的源代码文件中书写实现*
+这件事情也曾经引起学生阶段的我的反思。
+一个工程并不一定需要以这种方式组织。我们可以直接定义，不做任何声明，这样一来也不需要任何的头文件，进而也不需要任何的include指令，也就不会造成各种千奇百怪的错误了。
+
+当然这样是行不通的。我们知道有大量的库和前人的代码，比如几乎融汇在当今C++任何场景的使用的stl容器——不允许使用stl库，C++的生命力将受到毁灭性的打击。如果我们要使用stl的这些代码，却没有头文件这个概念，我们要怎么做？
+
+答案是，我们要把别人的代码全部`抄写`进我们自己的工程。我们将前往保存着stl库代码的git仓库，下载这些代码，并选中我们要使用的vector的两千多行代码，全部抄下来。哪怕我们的功能本身只有：
+```cpp
+std::vector<int> vec;
+vec.push_back(1);
+std::cout << vec[0] << std::endl;
+```
+这个程序依然会变成两三千行。
+
+除了避免丑陋的代码拷贝，我们还有一个动机要使用头文件。一个人开发出来的软件是较少的，大多数时候我们希望代码是许多人合作的。这种时候，按功能划分，每个人去编写自己的模块是合理的。然而如果没有头文件这个概念，a.cpp 和 b.cpp 各自定义的名字是互不可见的。这是因为，编译器把每个.cpp当成一个编译单元，他们会独立地经历整个编译过程，在这个时候，没有一个机制告诉正在编译的b.cpp：a.cpp定义了一个名字myClass，那是一个class。所以b.cpp只能报错：无法识别myClass。
+
+为了应对这个问题，头文件，一个集中了源文件中所有声明的文件出现了。如果b需要知晓a定义的某个名字是什么意思，只需要`#include a.h`。这个指令其实相当于让编译器帮我们完成抄写的任务，但这一次我们不必再抄写全部的代码了，我们仅仅需要抄写声明。
+
+## 矫枉过正：能不能不使用源文件
+在一些工程中我看到：一个类没有源文件，而只有头文件。头文件中就地定义并实现了所有的成员函数。这样做并不违背编译器的规则，但是依然会有一些问题。根据[一些文档](https://learn.microsoft.com/zh-cn/cpp/cpp/header-files-cpp?view=msvc-170&source=recommendations),有一些东西是绝对不要放进.h或.hpp的：
+- 命名空间或全局范围内的内置类型定义
+- 非内联函数定义
+- 非常量变量定义
+- 聚合定义
+- 未命名的命名空间
+- using 指令
+
+## 翻译单元
+我认为，编译单元本质上是一些名字和内存的对应。变量名，函数名，类名，包括常量表达式，本质上都是名字。一个名字背后一定对应了一个内存(当然类名似乎并不符合)
+内部链接的名字仅仅在此编译单元中可见，对于内部链接a.cpp 与b.cpp 的同名名字是可以共存的。
+默认情况下，以下对象具有内部链接：
+- const对象
+- constexpr对象
+- typedef对象
+- 命名空间范围中的 static 对象
+
+## 成为习惯的ifndef/pragma once
+这部分在一些关于C++ best practice的讨论中也称为Include规范。头文件的第一句话必须写明pragma once，要不然就要用ifndef + endif包裹整个头文件：
+```cpp
+#pragma once
+class A;
+
+//另一种写法
+#ifndef A_H
+#define A_H
+class A;
+#endif
+```
+
+这两种写法的目的是避免重复include。注意看这个说法是不太准确的，要知道一个头文件被两个不同的编译单元引用是非常正常的，这几乎就是头文件被发明出来的目的。其真正防止的是同一个文件include了同一个头文件两次，这样代码就会被编译器重建成这个样子：
+```cpp
+class A{
+    int a;
+}
+class A{
+    int a;
+}
+int main(){
+    //...
+}
+```
+事实上，多重include远比我们想象中出现的要频繁的多。感谢C++这套奇怪的引入机制，我们很多时候在代码中难以追查include的网络。假想一下，a.h 引入了vector，b.h 引入了a，但是也引入了vector。这种写法是很容易出现的。如果vector没有写pragma once，那么b.h中事实上就会出现两份vector声明了。
+
+
+## 难以排查的坑：一些库作者的习惯带来的后果
+我曾经碰到这样一个问题。在使用一个比较有名的，叫做stb_image的库的时候，我这样去书写我的代码：
+```cpp
+//imageloader.h
+#pragma once
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+//imageloader.cpp
+#include "imageloader.h"
+```
+
+这里的`STB_IMAGE_IMPLEMENTATION`并不是我们自己要定义的，stb_image的作者在git上指出，若要使用，应当在include位置定义这个宏。
+
+这样写看起来是合情合理的，因为如果一定要定义这个宏，那么把它放在头文件中，让我们的cpp文件再引用头文件，是一个太经典不过的流程。
+
+这个代码将会报链接错误：`STB_IMAGE_IMPLEMENTATION`重复定义。
+
+回看stb_image库的readme文档，其中对于这句定义的位置也有要求：
+![](./markdown_pic/cpp-3.png)
+
+这是一个库作者优化习惯造成的问题，在这里应该把STB_IMAGE_IMPLEMENTATION定义在一个.cpp中，并且在那之后include stb_image
+```cpp
+//ImageLoader.cpp
+#include "ImageLoader.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+```
+
+## 严重的问题：循环include
+有时候，即便已经把所有的头文件都加上了pragma规范，依然会出现问题。如果你突然发现一个引入的头文件中的类在接下来的代码中无论怎样都无法识别，应该考虑一下，排查include是否存在循环。
+
+假如有三个文件：
+Shader.h 要使用Model类
+Model.h 要使用Mesh类
+Mesh.h 要使用Shader类
+
+这就形成了一个环形引用，最终一定会有某一个类的代码中，要使用的那个类不可识别。
+```cpp
+//Shader.h
+#pragma once
+#include "Model.h"
+class Shader{
+    Model m_model;
+};
+
+//Model.h
+#pragma once
+#include "Mesh.h"
+class Model{
+    Mesh m_mesh;
+};
+
+//Mesh.h
+#pragma once
+#include "Shader.h"
+class Mesh{
+    Shader m_shader;
+};
+```
+
+如果按照上面的顺序，编译器将会做如下处理：
+```cpp
+//Shader.h
+//如果不是pragma限制，引入Mesh.h时又会引入Shader.h
+class Mesh{
+    Shader m_shader;
+};
+class Model{
+    Mesh m_mesh;
+};
+class Shader{
+    Model m_model;
+};
+```
+即便形成这样的代码，依然是无法工作的，因为在Mesh中用到了Shader，而这个关键字尚且没有被声明出来。
+
+假如这三者的互相使用关系确实存在，我们也并不是没有办法解开这个循环引用。
+我们知道，每一份源文件都会形成一个编译单元，对于这个源文件，一定会形成一个独立于其他编译单元的编译器实例。我们可以利用这一点。
+注意，想当然地在每个.h文件之前都预声明一个要使用的类，并不能解决问题。
+
+```cpp
+//Shader.h
+#pragma once
+class Model;//声明
+class Shader{
+    Model m_model;
+    void function_with_model(const Model& model);
+};
+
+//Shader.cpp
+#include "Shader.h"
+#include "Model.h"
+void Shader::function_with_model(const Model& model);
+
+//Model.h
+#include "Mesh.h"
+//include mesh后不必再预声明Mesh
+class Model{
+    
+};
+```
