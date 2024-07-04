@@ -42,6 +42,77 @@ be 2
 
 __index更为强大的一个设计在于我称之为**查询转发**的特性。如果对于table t 的key的查询miss，转进t的元表，而__index又是一张表（在上面的例子中__index是函数），将会进入一个循环：查询t的元表mt是否具有key，有则返回；如果没有，而mt的元表又有__index，那么将会进而查询mt的元表mmt是否有key，如此循环。这个特性非常强大，我们在后面Lua面向对象中就会用到。
 
+__index可以是一个表，那么被转发后将会查询这张表；也可以是一个函数，两个参数分别是调用table和查询目标key。比如，我们希望完成这样一个功能：
+
+顶层程序员可以通过`mgrs.window`来使用名为WindowManager的类，由`mgrs.event`来使用名为EventManager的类。但我们又不希望直接设计一个Managers.Lua，其中没有任何类对象，直接堆放mgrs的所有成员：
+```lua
+    mgrs = {}
+    mgrs.window = require("app.managers.WindowManager")
+    mgrs.event = require("app.managers.EventManager")
+```
+这个代码至少有这样一些严重问题：
+1. 在项目启动时，mgrs的所有Manager类就必须被装入了，启动时会花费更长的时间；
+2. 如果Managers越来越多，体量越来越大，Manager的所有行为和数据都要被装入内存，且不论项目如何运行都要一直维持这些内存不得释放。mgrs变成一个巨大的全局表。
+
+于是我们设计一层路由，为mgrs设计一个元表Managers，并规定如何由mgrs.xx访问到具体的Manager类
+```lua
+local paths = {
+    "app.EventManager",
+    "app.WindowManager",
+    "app.FoodManager",
+    "app.module.InnerManager"
+}
+function split(str, targetChar)
+    local tbl = {}
+    local l = 1
+    local r = 1
+    if #str <= 2 then
+        return tbl
+    end
+    for r = 2, #str do
+        if string.sub(str, r, r) == targetChar then
+            local subs = string.sub(str, l, r - 1)
+            tbl[#tbl + 1] = subs
+            l = r + 1
+        end
+    end
+    r = #str
+    tbl[#tbl + 1] = string.sub(str, l, r)
+    return tbl
+end
+local class2Path = {}
+for _, path in ipairs(paths) do
+    local split_list = split(path, ".")
+    local cls = split_list[#split_list]
+    class2Path[cls] = path
+end
+-- InnerManager->app.module.InnerManager   for example
+
+local Managers = {
+    __index = function(table, index)
+        local mgr = rawget(table, index) -- 如果能查到，直接把mgrs[index]返回
+        if not mgr then
+            --改大写
+            local class = string.gsub(index, "^[a-z]", string.upper)
+            local path = class2Path[class]
+            if not path then 
+                path = class2Path[class.."Manager"]
+            end
+            -- mgr = require(path).new()
+            -- 这里为了快速展示效果，直接print
+            print("requiring " .. path)
+            rawset(table, index, mgr)
+        end
+        return mgr
+    end
+}
+
+mgrs = {}
+setmetatable(mgrs, Managers)
+
+local h = mgrs.window
+```
+
 ### 元方法 __newindex
 另一个元方法是`__newindex`，与`__index`类似，但是只在改写值的调用miss时才会执行。事实上，元表在更底层具有更高的执行优先级，**当发生table赋值访问miss，先查询元表__newindex，依然miss才会执行插入**。这就带来了一个潜在的编程错误，我们不能在__newindex函数体内用下标直接改写新值，像这样：
 ```lua
@@ -341,7 +412,16 @@ a:print()
 执行到`instance:ctor(...)`等同于`instance.ctor(instance,...)`,而...此时传入了Myclass，即为
 `instance.ctor(instance, Myclass)`。instance并没有ctor键，转向元表查询，查到Myclass有名为new的键，从而执行。在new函数体内，cls就是Myclass。
 
-### 加入继承
 
+### 浅谈Lua GC 和 类的规范
+计算机语言之间流行的内存回收有两套不同的策略，引用数监测与广义GC。引用数检测即失去最后一个引用的内存被回收；Lua没有采用这种策略，这是因为动态类型语言的引用监测开销不小，即便没有分配内存也需要监测引用。
+
+Lua中的一切对象都是GC的对象，除了注册表registry和共享元表shared metaTable。注册表也是一张表，存放着全局表_G,主线程main thread 和 package.loaded
+
+LuaGC在5.0和更早版本中，遵循mark and sweep过程。在Lua中所有对象都被放在一张列表(object gragh，对象图，实际上是顺序表)中，Mark过程就是遍历整个表，标记活对象(live object)。Sweep就是再次遍历全表，然后删除一切没有被标记为活对象的内存。执行GC的推荐时机是当内存使用量达到上次清扫结束后内存的两倍的时候。老GC方案的弊端被称为stop the world：程序暂停来等待GC完成，影响了性能。
+
+5.1起的Lua GC变得复杂了许多，一般称为三色GC或者incremental collection方案。简单来说，垃圾回收器和主程序变成了交替执行的两套程序；GC中mark阶段不再简单把物体分为live和dead，而是分为三种颜色：近期没有访问的object标记为白色；访问过但是本次遍历没有走到的对象标记为灰色；被遍历到的对象标记为黑色。也就是说，除了GC的mark步骤，就连普通的赋值语句也能改写对象的GC颜色，从而影响对象是否在接下来的一次GC中被删除。
+
+在传统面向对象语言，比如C++中，成员是在类声明期确定的。C++类一旦被声明，就不能再对其中增添更多成员。Lua类本身是一个Table，对象化后，**并没有一种机制限制Lua类的成员列表更改**。也就是说，任何类的成员函数可以在执行期往Lua类中添加新的成员。同时，Lua类代码也并没有一套生命周期机制，类里面并没有C++的析构函数。目前Lua开发者对于LuaGC过程的探究是普遍不足的，基本采取一种完全信任Lua GC的态势。
 
 # Learn ToLua
