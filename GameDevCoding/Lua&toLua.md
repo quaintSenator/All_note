@@ -62,6 +62,7 @@ local paths = {
     "app.FoodManager",
     "app.module.InnerManager"
 }
+-- 随便写的切割字符串工具，细节不到位
 function split(str, targetChar)
     local tbl = {}
     local l = 1
@@ -107,11 +108,19 @@ local Managers = {
     end
 }
 
-mgrs = {}
+mgrs = {} -- _G 全局量
 setmetatable(mgrs, Managers)
-
+------
+-- 使用mgrs的其他区代码
 local h = mgrs.window
 ```
+输出：
+```
+requiring app.WindowManager
+```
+在这个过程中，mgrs.window未能命中，触发了元表的Managers.__index(table, index)元方法，table = mgrs，index = "window"；在这之后，mgrs中就新增了一项记录`["window"->WindowManager Instance]`,从而在未来mgrs.window访问时，不再需要触发元表的__index元方法。时间上来看，这套方法是即用即取而不是在启动时洪泛装载，开销均匀地分布在程序运行全周期里；从空间上来看，mgrs占用了全局空间，但是未使用到的pairs不会出现在内存里，也比之前的方法更实惠。
+
+这个功能实现后，我们就能以mgrs.xx 直接访问到一个创建好的Manager类，而且从Manager模式的设计初衷来看，Manager应当是全局单例的。
 
 ### 元方法 __newindex
 另一个元方法是`__newindex`，与`__index`类似，但是只在改写值的调用miss时才会执行。事实上，元表在更底层具有更高的执行优先级，**当发生table赋值访问miss，先查询元表__newindex，依然miss才会执行插入**。这就带来了一个潜在的编程错误，我们不能在__newindex函数体内用下标直接改写新值，像这样：
@@ -230,7 +239,8 @@ __add function hazard!! a.__add wins
 ```lua
     
 ```
-
+## Lua模块
+Lua从5.1开始引入了模块，
 
 ## Lua面向对象
 *Lua中本没有类；用的人多了，便有了类*
@@ -412,7 +422,6 @@ a:print()
 执行到`instance:ctor(...)`等同于`instance.ctor(instance,...)`,而...此时传入了Myclass，即为
 `instance.ctor(instance, Myclass)`。instance并没有ctor键，转向元表查询，查到Myclass有名为new的键，从而执行。在new函数体内，cls就是Myclass。
 
-
 ### 浅谈Lua GC 和 类的规范
 计算机语言之间流行的内存回收有两套不同的策略，引用数监测与广义GC。引用数检测即失去最后一个引用的内存被回收；Lua没有采用这种策略，这是因为动态类型语言的引用监测开销不小，即便没有分配内存也需要监测引用。
 
@@ -424,4 +433,9 @@ LuaGC在5.0和更早版本中，遵循mark and sweep过程。在Lua中所有对�
 
 在传统面向对象语言，比如C++中，成员是在类声明期确定的。C++类一旦被声明，就不能再对其中增添更多成员。Lua类本身是一个Table，对象化后，**并没有一种机制限制Lua类的成员列表更改**。也就是说，任何类的成员函数可以在执行期往Lua类中添加新的成员。同时，Lua类代码也并没有一套生命周期机制，类里面并没有C++的析构函数。目前Lua开发者对于LuaGC过程的探究是普遍不足的，基本采取一种完全信任Lua GC的态势。
 
+在UnityLua开发中，所有的Lua脚本最终都被转换成了C#脚本，并由C#进行内存管理。
+
+## Lua GC
+在这里我们系统性地讨论LuaGC。总体而言，即便是5.1后最新的Lua，垃圾回收器Garbage Collector
+//似乎没有必要讨论GC，因为ToLua会全部将Lua转换成C#
 # Learn ToLua
